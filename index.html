@@ -238,15 +238,19 @@ body{background-image:var(--deco);background-attachment:fixed}
           </div>
           <div class="rng"><span>Lissage des contours</span><output id="oSmooth"></output><input id="imgSmooth" type="range" min="0" max="1.5" step="0.05" value="0.2"></div>
           <div class="rng"><span>Ignorer les détails plus petits que</span><output id="oMinA"></output><input id="imgMinA" type="range" min="0" max="5" step="0.1" value="0.3"></div>
-          <div class="rng"><span>Taille de l'image</span><output id="oImgScale"></output><input id="imgScale" type="range" min="30" max="100" step="1" value="100"></div>
+          <div class="rng"><span>Taille de l'image</span><output id="oImgScale"></output><input id="imgScale" type="range" min="10" max="100" step="1" value="100"></div>
+          <div class="rng"><span>Position gauche ↔ droite</span><output id="oImgX"></output><input id="imgX" type="range" min="-25" max="25" step="0.5" value="0"></div>
+          <div class="rng"><span>Position bas ↔ haut</span><output id="oImgY"></output><input id="imgY" type="range" min="-15" max="15" step="0.5" value="0"></div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn ghost" id="imgCenter" type="button">Centrer l'image</button>
+            <span class="small" style="flex:1;min-width:150px">Dans la vue Empreinte, fais glisser l'image du doigt pour la placer.</span>
+          </div>
           <div id="layWrap" style="display:flex;flex-direction:column;gap:10px">
-            <div class="seg" role="group" aria-label="Disposition avec le texte">
-              <button id="lAbove" type="button" aria-pressed="true">Au-dessus</button>
-              <button id="lLeft" type="button" aria-pressed="false">À gauche</button>
-              <button id="lOver" type="button" aria-pressed="false">Superposés</button>
+            <div class="seg" role="group" aria-label="Texte et image">
+              <button id="tAlign" type="button" aria-pressed="true">Texte aligné sur l'image</button>
+              <button id="tFree" type="button" aria-pressed="false">Texte indépendant</button>
             </div>
-            <div class="rng" id="shareWrap"><span>Place de l'image</span><output id="oShare"></output><input id="imgShare" type="range" min="20" max="80" step="1" value="50"></div>
-            <p class="small" style="margin:0">Efface le texte pour un tampon avec l'image seule.</p>
+            <p class="small" style="margin:0" id="layHelp">Aligné : le texte prend la plus grande place libre à côté de l'image et suit son axe. Indépendant : le texte reste centré sur la plaque, l'image peut passer dessous. Efface le texte pour l'image seule.</p>
           </div>
         </div>
       </div>
@@ -9255,23 +9259,33 @@ const Geo = (() => {
     let content = [], txtBox = null, imgBox = null;
     if (fit(1, 1) > 0) {
       const tw = lay ? lay.bb.x2 - lay.bb.x1 : 0, th = lay ? lay.bb.y2 - lay.bb.y1 : 0;
-      const a = img ? img.w / img.h : 1, gap = 0.25;
-      const layout = lay && img ? (p.imgLayout || 'above') : null;
-      if (lay && !img) txtBox = { cx: 0, cy: 0, s: fit(tw, th) };
-      else if (img && !lay) { const S = fit(a, 1); imgBox = { cx: 0, cy: 0, w: a * S, h: S }; }
-      else if (layout === 'over') {
+      // Image : posée librement (centre imgX, imgY en mm, vu sur le papier), taille = part de la plus grande taille possible
+      if (img) {
+        const a = img.w / img.h, S = fit(a, 1) * (p.imgScale || 1);
+        imgBox = { cx: p.imgX || 0, cy: p.imgY || 0, w: a * S, h: S };
+      }
+      if (lay) {
         txtBox = { cx: 0, cy: 0, s: fit(tw, th) };
-        const S = fit(a, 1); imgBox = { cx: 0, cy: 0, w: a * S, h: S };
-      } else if (layout === 'left') { // image à gauche du texte (sur le papier)
-        const f = Math.min(0.85, Math.max(0.15, p.imgShare || 0.5)), u = tw / th;
-        const iw = (f / (1 - f)) * u, ih = iw / a, Wt = iw + gap + u, Ht = Math.max(ih, 1), S = fit(Wt, Ht);
-        imgBox = { cx: (-Wt / 2 + iw / 2) * S, cy: 0, w: iw * S, h: ih * S };
-        txtBox = { cx: (Wt / 2 - u / 2) * S, cy: 0, s: S / th };
-      } else { // image au-dessus du texte
-        const f = Math.min(0.85, Math.max(0.15, p.imgShare || 0.5)), u = tw / th;
-        const k = f / (1 - f), Wt = Math.max(k * a, u), Ht = k + gap + 1, S = fit(Wt, Ht);
-        imgBox = { cx: 0, cy: (Ht / 2 - k / 2) * S, w: k * a * S, h: k * S };
-        txtBox = { cx: 0, cy: (-Ht / 2 + 0.5) * S, s: S / th };
+        if (imgBox && p.textAlign) {
+          // texte aligné : dans la plus grande place libre à côté de l'image, sur l'axe de l'image
+          const AW = p.shape === 'round' ? rIn / Math.SQRT2 : aw / 2, AH = p.shape === 'round' ? rIn / Math.SQRT2 : ah / 2;
+          const gp = Math.max(1, Math.min(3, p.margin || 2));
+          const x1 = imgBox.cx - imgBox.w / 2, x2 = imgBox.cx + imgBox.w / 2, y1 = imgBox.cy - imgBox.h / 2, y2 = imgBox.cy + imgBox.h / 2;
+          const zones = [
+            [x2 + gp, AW, -AH, AH, 'h'], [-AW, x1 - gp, -AH, AH, 'h'],
+            [-AW, AW, y2 + gp, AH, 'v'], [-AW, AW, -AH, y1 - gp, 'v']];
+          let best = null;
+          for (const [zx1, zx2, zy1, zy2, ax] of zones) {
+            const zw = zx2 - zx1, zh = zy2 - zy1; if (zw < 2 || zh < 2) continue;
+            const s = Math.min(zw / tw, zh / th), hw = (tw * s) / 2, hh = (th * s) / 2;
+            const clampv = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)));
+            const cx = ax === 'h' ? (zx1 + zx2) / 2 : clampv(imgBox.cx, zx1 + hw, zx2 - hw);
+            const cy = ax === 'v' ? (zy1 + zy2) / 2 : clampv(imgBox.cy, zy1 + hh, zy2 - hh);
+            if (th * s >= 2.5 && (!best || s > best.s)) best = { cx, cy, s };
+          }
+          if (best) txtBox = best;
+          else warnings.push("Pas assez de place pour le texte à côté de l'image : il est centré sur la plaque. Réduis ou déplace l'image.");
+        }
       }
     }
     if (lay && txtBox) {
@@ -9288,9 +9302,9 @@ const Geo = (() => {
     }
     let imageInfo = null;
     if (img && imgBox) {
-      const k = p.imgScale || 1, bw = imgBox.w * k, bh = imgBox.h * k;
+      const bw = imgBox.w, bh = imgBox.h;
       const ip = translate(imagePaths(img, p, bw, bh), imgBox.cx, imgBox.cy);
-      imageInfo = { width: bw, height: bh, empty: !ip.length };
+      imageInfo = { width: bw, height: bh, cx: imgBox.cx, cy: imgBox.cy, empty: !ip.length };
       if (!ip.length) warnings.push("L'image ne donne aucun relief avec ce seuil : bouge le curseur « Seuil » ou coche « Inverser ».");
       content = union(content, ip);
     }
@@ -9305,6 +9319,7 @@ const Geo = (() => {
       reliefPaths = union(reliefPaths, content);
     }
     reliefPaths = inter(reliefPaths, usable);
+    if (p.heal) reliefPaths = offset(offset(reliefPaths, -p.heal), p.heal); // soude les contours qui se touchent en un point
     const R = tree(reliefPaths);
 
     // Poignée et repère de centrage gravé au dos
@@ -9495,11 +9510,11 @@ const Geo = (() => {
     let q = p, d, plate, chk;
     for (let k = 0; k < 3; k++) {
       d = design(q); plate = plateMesh(d, q); chk = check(plate);
-      if (chk.watertight || !q.image) break;
-      q = Object.assign({}, q, { imgSmooth: (q.imgSmooth || 0) + 0.15, imgMinArea: (q.imgMinArea || 0.3) + 0.2 });
+      if (chk.watertight) break;
+      q = Object.assign({}, q, { heal: 0.03 * (k + 1) }, q.image ? { imgSmooth: (q.imgSmooth || 0) + 0.15, imgMinArea: (q.imgMinArea || 0.3) + 0.2 } : {});
       if (k === 0) d.warnings.push('');
     }
-    if (q !== p) d.warnings = d.warnings.filter(Boolean).concat(chk.watertight ? ["Image très détaillée : un peu plus de lissage a été appliqué automatiquement pour obtenir un modèle imprimable."] : []);
+    if (q !== p) d.warnings = d.warnings.filter(Boolean).concat(chk.watertight && p.image ? ["Image très détaillée : un peu plus de lissage a été appliqué automatiquement pour obtenir un modèle imprimable."] : []);
     return { d, plate, chk, p: q };
   }
   return { design, build, autoThreshold, imagePaths, plateMesh, handleMesh, handleProfile, check, stl, zip, toMM, walk };
@@ -9524,10 +9539,10 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
   const fmt = { oScale: (v) => v + ' %', oGap: (v) => (+v).toFixed(2).replace('.', ','), oThick: (v) => (+v).toFixed(2).replace('.', ',') + ' mm',
     oRad: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oMargin: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oBw: (v) => (+v).toFixed(1).replace('.', ',') + ' mm',
     oBase: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oRelief: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oHh: (v) => v + ' mm',
-    oThr: (v) => v + ' %', oSmooth: (v) => (+v).toFixed(2).replace('.', ',') + ' mm', oMinA: (v) => (+v).toFixed(1).replace('.', ',') + ' mm²', oImgScale: (v) => v + ' %', oShare: (v) => v + ' %' };
+    oThr: (v) => v + ' %', oSmooth: (v) => (+v).toFixed(2).replace('.', ',') + ' mm', oMinA: (v) => (+v).toFixed(1).replace('.', ',') + ' mm²', oImgScale: (v) => v + ' %', oImgX: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oImgY: (v) => (+v).toFixed(1).replace('.', ',') + ' mm' };
   const outs = { textScale: 'oScale', lineGap: 'oGap', thicken: 'oThick', radius: 'oRad', margin: 'oMargin', borderW: 'oBw', base: 'oBase', relief: 'oRelief', handleH: 'oHh',
-    imgThr: 'oThr', imgSmooth: 'oSmooth', imgMinA: 'oMinA', imgScale: 'oImgScale', imgShare: 'oShare' };
-  let image = null, imgName = '', imgLayout = 'above';
+    imgThr: 'oThr', imgSmooth: 'oSmooth', imgMinA: 'oMinA', imgScale: 'oImgScale', imgX: 'oImgX', imgY: 'oImgY' };
+  let image = null, imgName = '', textAlign = true, inkT = null, dragging = false;
   const syncOuts = () => { for (const [i, o] of Object.entries(outs)) $(o).textContent = fmt[o]($(i).value); };
   const clamp = (v, a, b, d) => { v = parseFloat(String(v).replace(',', '.')); return isFinite(v) ? Math.min(b, Math.max(a, v)) : d; };
   function params() {
@@ -9537,7 +9552,7 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
       thicken: +$('thicken').value, mirror: $('mirror').checked, font: fonts[$('font').value], text: $('text').value, lineGap: +$('lineGap').value,
       textScale: +$('textScale').value / 100, handle: $('handle').checked, handleH: +$('handleH').value,
       image: image && $('imgUse').checked ? image : null, imgThreshold: +$('imgThr').value / 100, imgInvert: $('imgInv').checked,
-      imgSmooth: +$('imgSmooth').value, imgMinArea: +$('imgMinA').value, imgScale: +$('imgScale').value / 100, imgLayout, imgShare: +$('imgShare').value / 100,
+      imgSmooth: +$('imgSmooth').value, imgMinArea: +$('imgMinA').value, imgScale: +$('imgScale').value / 100, imgX: +$('imgX').value, imgY: +$('imgY').value, textAlign,
     };
   }
 
@@ -9606,6 +9621,13 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
     g.globalAlpha = 0.35; g.strokeStyle = '#555'; g.lineWidth = 1 / s; g.setLineDash([4 / s, 4 / s]);
     const o = Geo.toMM(d.outline); g.beginPath(); g.moveTo(o[0][0], o[0][1]); for (const q of o) g.lineTo(q[0], q[1]); g.closePath(); g.stroke();
     g.restore();
+    inkT = { s, sx: d && last.p.mirror ? 1 : -1, ox: W / 2, oy: H / 2 - 8 };
+    // cadre de l'image (position actuelle des curseurs) : poignée pour la déplacer
+    if (image && $('imgUse').checked && d.imageInfo) {
+      const iw = d.imageInfo.width, ih = d.imageInfo.height, x = +$('imgX').value, y = +$('imgY').value;
+      g.save(); g.setLineDash([6, 4]); g.lineWidth = dragging ? 2 : 1.2; g.strokeStyle = '#d0342c'; g.globalAlpha = dragging ? 1 : 0.8;
+      g.strokeRect(inkT.ox + inkT.sx * x * s - (iw * s) / 2, inkT.oy - y * s - (ih * s) / 2, iw * s, ih * s); g.restore();
+    }
     // règle 10 mm
     g.fillStyle = '#333'; g.globalAlpha = 0.7; g.fillRect(20, H - 22, 10 * s, 3);
     g.font = '12px "IBM Plex Mono", monospace'; g.fillText('10 mm', 20, H - 28); g.globalAlpha = 1;
@@ -9620,7 +9642,9 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
     $('wLabel').textContent = shape === 'round' ? 'Diamètre (mm)' : 'Largeur (mm)';
     $('bwWrap').hidden = !p.border; $('hhWrap').hidden = !p.handle;
     const hasText = !!(p.text && p.text.trim());
-    $('layWrap').hidden = !(p.image && hasText); $('shareWrap').hidden = imgLayout === 'over';
+    $('layWrap').hidden = !(p.image && hasText);
+    const H2 = (shape === 'round' ? p.w : p.h) / 2;
+    $('imgX').min = -p.w / 2; $('imgX').max = p.w / 2; $('imgY').min = -H2; $('imgY').max = H2; syncOuts();
     let d, plate, handle, chk;
     try {
       const b = Geo.build(p);
@@ -9683,7 +9707,7 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
 
   // ----- événements -----
   for (const id of ['text', 'w', 'h', 'radius', 'base', 'relief', 'margin', 'border', 'borderW', 'thicken', 'lineGap', 'textScale', 'handle', 'handleH', 'font',
-    'mirror', 'imgUse', 'imgSmooth', 'imgMinA', 'imgScale', 'imgShare'])
+    'mirror', 'imgUse', 'imgSmooth', 'imgMinA', 'imgScale', 'imgX', 'imgY'])
     $(id).addEventListener('input', schedule);
   for (const id of ['mirror', 'imgUse', 'imgInv', 'border', 'handle']) $(id).addEventListener('change', schedule);
 
@@ -9735,22 +9759,51 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
       $('imgName').textContent = `${imgName} · ${s.w} × ${s.h} px`;
       $('imgCtl').hidden = false; $('imgClear').hidden = false; $('imgUse').checked = true; $('imgPick').textContent = 'Changer d’image';
       $('imgInv').checked = false; autoThr();
-      setLayout(shape === 'rect' && clamp($('w').value, 12, 180, 50) >= 1.3 * clamp($('h').value, 12, 180, 30) ? 'left' : 'above');
+      placeDefault();
       // fond sombre (lu sur le pourtour de l'image ; le transparent compte comme papier) : on inverse d'office
       let dark = 0, n = 0; const W = image.w, H = image.h;
       const at = (x, y) => { const i = y * W + x; n++; dark += (1 - image.lum[i]) * image.alpha[i]; };
       for (let x = 0; x < W; x++) { at(x, 0); at(x, H - 1); } for (let y = 1; y < H - 1; y++) { at(0, y); at(W - 1, y); }
       if (n && dark / n > 0.6) { $('imgInv').checked = true; autoThr(); }
       $('msg').textContent = 'Image chargée. Règle le seuil pour choisir ce qui sera en relief.';
-      framed = false; drawImgPrev(); schedule();
+      framed = false; drawImgPrev(); setView('ink'); schedule();
     } catch (err) { console.error(err); $('msg').textContent = "Cette image n'a pas pu être lue. Essaie un JPEG ou un PNG."; }
   });
   $('imgClear').onclick = () => { image = null; $('imgCtl').hidden = true; $('imgClear').hidden = true; $('imgPick').textContent = 'Choisir une image'; $('msg').textContent = ''; schedule(); };
   $('imgThr').addEventListener('input', () => { drawImgPrev(); schedule(); });
   $('imgInv').addEventListener('change', () => { autoThr(); drawImgPrev(); schedule(); });
   $('imgAuto').onclick = () => { autoThr(); drawImgPrev(); schedule(); };
-  const setLayout = (l) => { imgLayout = l; for (const [id, k] of [['lAbove', 'above'], ['lLeft', 'left'], ['lOver', 'over']]) $(id).setAttribute('aria-pressed', l === k); schedule(); };
-  $('lAbove').onclick = () => setLayout('above'); $('lLeft').onclick = () => setLayout('left'); $('lOver').onclick = () => setLayout('over');
+  const setAlign = (a) => { textAlign = a; $('tAlign').setAttribute('aria-pressed', a); $('tFree').setAttribute('aria-pressed', !a); schedule(); };
+  $('tAlign').onclick = () => setAlign(true); $('tFree').onclick = () => setAlign(false);
+  // placement de départ : à gauche sur une plaque large, en haut sinon ; au centre sans texte
+  function placeDefault() {
+    const W = clamp($('w').value, 12, 180, 50), H = shape === 'round' ? W : clamp($('h').value, 12, 180, 30);
+    $('imgX').min = -W / 2; $('imgX').max = W / 2; $('imgY').min = -H / 2; $('imgY').max = H / 2;
+    let x = 0, y = 0, s = 100;
+    if ($('text').value.trim()) {
+      const a = image.w / image.h;
+      if (shape === 'rect' && W >= 1.3 * H) { s = Math.round(Math.min(90, Math.max(30, (W * 0.38) / (H * a) * 100))); x = -W / 2 + Math.min(W * 0.38, (H - 6) * a * s / 100) / 2 + 3; }
+      else { s = 50; y = H / 4 - 0.5; }
+    }
+    $('imgScale').value = s; $('imgX').value = Math.round(x * 2) / 2; $('imgY').value = Math.round(y * 2) / 2; setAlign(true);
+  }
+  $('imgCenter').onclick = () => { $('imgX').value = 0; $('imgY').value = 0; schedule(); drawInk(); };
+  // glisser l'image dans la vue Empreinte (doigt ou souris)
+  const inkC = $('viewInk');
+  inkC.addEventListener('pointerdown', (e) => {
+    if (!image || !$('imgUse').checked || !inkT) return;
+    dragging = { x: e.clientX, y: e.clientY, ix: +$('imgX').value, iy: +$('imgY').value };
+    inkC.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  inkC.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const r = (v) => Math.round(v * 2) / 2;
+    $('imgX').value = r(dragging.ix + ((e.clientX - dragging.x) / inkT.s) * inkT.sx);
+    $('imgY').value = r(dragging.iy - (e.clientY - dragging.y) / inkT.s);
+    syncOuts(); drawInk(); schedule();
+  });
+  const endDrag = () => { dragging = false; drawInk(); };
+  inkC.addEventListener('pointerup', endDrag); inkC.addEventListener('pointercancel', endDrag);
   $('font').addEventListener('change', schedule);
   const setShape = (s) => { shape = s; $('sRect').setAttribute('aria-pressed', s === 'rect'); $('sRound').setAttribute('aria-pressed', s === 'round'); framed = false; schedule(); };
   $('sRect').onclick = () => setShape('rect'); $('sRound').onclick = () => setShape('round');
