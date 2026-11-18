@@ -388,7 +388,30 @@ body{background-image:var(--deco);background-attachment:fixed}
     <fieldset>
       <legend>Poignée</legend>
       <label class="chk" for="handle"><input id="handle" type="checkbox" checked> Ajouter une poignée (pièce séparée, à coller)</label>
-      <div class="rng" id="hhWrap"><span>Hauteur de la poignée</span><output id="oHh"></output><input id="handleH" type="range" min="20" max="70" step="1" value="40"></div>
+      <div id="hCtl" style="display:flex;flex-direction:column;gap:12px">
+        <div class="seg grid" role="group" aria-label="Modèle de poignée" id="hStyles">
+          <button data-hs="mush" aria-pressed="true">Champignon</button>
+          <button data-hs="ball" aria-pressed="false">Boule</button>
+          <button data-hs="pear" aria-pressed="false">Poire</button>
+          <button data-hs="cyl" aria-pressed="false">Colonne</button>
+          <button data-hs="disc" aria-pressed="false">Palet</button>
+        </div>
+        <div class="rng" id="hhWrap"><span>Hauteur de la poignée</span><output id="oHh"></output><input id="handleH" type="range" min="20" max="80" step="1" value="40"></div>
+        <div class="row">
+          <div class="rng"><span>Épaisseur du manche</span><output id="oHNeck"></output><input id="hNeck" type="range" min="60" max="150" step="5" value="100"></div>
+          <div class="rng"><span>Taille de la tête</span><output id="oHKnob"></output><input id="hKnob" type="range" min="60" max="150" step="5" value="100"></div>
+        </div>
+        <div class="row">
+          <div class="rng"><span>Facettes</span><output id="oHFac"></output><input id="hFac" type="range" min="2" max="12" step="1" value="2"></div>
+          <div class="rng" id="hTwWrap"><span>Torsade</span><output id="oHTw"></output><input id="hTw" type="range" min="0" max="180" step="5" value="0"></div>
+        </div>
+        <label for="hTop">Sur le dessus
+          <select id="hTop"><option value="none">Rien (dessus bombé)</option><option value="text">Initiales en relief</option><option value="sym">Un symbole en relief</option></select>
+        </label>
+        <label for="hTopText" id="hTopTextWrap" hidden>Initiales (3 lettres au plus)<input id="hTopText" type="text" maxlength="3" autocomplete="off" placeholder="Ex. BC"></label>
+        <div class="symgrid" id="hSymGrid" hidden></div>
+        <p class="small" style="margin:0" id="hTopHelp" hidden>Colle la poignée en tournant le haut du décor vers le petit trait gravé au dos de la plaque.</p>
+      </div>
       <p class="small" style="margin:0">Un cercle gravé au dos de la plaque sert de repère pour la coller bien au centre. Le petit trait indique le haut du texte.</p>
     </fieldset>
 
@@ -9676,26 +9699,74 @@ const Geo = (() => {
     return new Float32Array(m.t);
   }
 
-  // Poignée : solide de révolution, base plate (collée au dos), bouton bombé
-  function handleProfile(Rb, Hh) {
-    const rn = Math.min(8, Rb * 0.6), rk = Math.min(Rb * 0.95, Math.max(rn + 3, 11));
-    const knobRise = rk - rn; // 45° pour le bouton
+  // Poignée : solide de révolution, base plate (collée au dos)
+  // o : {style:'mush'|'ball'|'cyl'|'pear'|'disc', neck, knob (facteurs 0,6..1,5), flat (dessus plat pour un décor)}
+  // Aucun surplomb à plus de 45° : la poignée s'imprime debout sans supports.
+  function handleProfile(Rb, Hh, o = {}) {
+    const style = o.style || 'mush', fk = o.knob || 1, fn = o.neck || 1, flat = !!o.flat;
+    const rn = Math.max(3, Math.min(Rb - 1.5, Math.min(8, Rb * 0.6) * fn));
+    const pts = [[Rb, 0], [Rb, 1.2]];
+    const flare = (zn, rTo) => { for (let i = 1; i <= 24; i++) { const u = i / 24, e = 1 - Math.pow(1 - u, 2.2); pts.push([Rb - (Rb - rTo) * e, 1.2 + (zn - 1.2) * u]); } };
+    const capTo = (r0, z0, R, H, frac) => { // quart d'ellipse (r0 -> sommet), coupé à plat si demandé
+      const aEnd = flat ? Math.acos(Math.min(0.95, Math.max(0.3, frac))) : (Math.PI / 2) * 0.93;
+      for (let i = 1; i <= 16; i++) { const a = (i / 16) * aEnd; pts.push([R * Math.cos(a), z0 + H * Math.sin(a)]); }
+    };
+    if (style === 'cyl') {
+      const rc = Math.max(rn, Math.min(Rb - 1, rn * 1.15 * fk)), f = Math.min(2.5, rc * 0.3);
+      flare(Math.min(8, Hh * 0.25), rc);
+      pts.push([rc, Hh - f]);
+      for (let i = 1; i <= 8; i++) { const a = (i / 8) * (Math.PI / 2); pts.push([rc - f + f * Math.cos(a), Hh - f + f * Math.sin(a)]); }
+      return pts;
+    }
+    if (style === 'disc') {
+      let rd = Math.max(rn + 3, Math.min(30, Rb * 1.15 * fk)), rim = 4, f = 1.5;
+      let zc = Hh - rim - (rd - rn); // départ du cône à 45° sous le palet
+      if (zc < 6) { rd = Math.max(rn + 2, rd - (6 - zc)); zc = Hh - rim - (rd - rn); }
+      flare(Math.max(4, zc), rn);
+      for (let i = 1; i <= 6; i++) { const u = i / 6; pts.push([rn + (rd - rn) * u, zc + (rd - rn) * u]); }
+      pts.push([rd, Hh - f]);
+      for (let i = 1; i <= 6; i++) { const a = (i / 6) * (Math.PI / 2); pts.push([rd - f + f * Math.cos(a), Hh - f + f * Math.sin(a)]); }
+      return pts;
+    }
+    if (style === 'ball') {
+      const R = Math.max(rn + 2, Math.min(Rb * 1.05, 13) * fk), c45 = Math.SQRT1_2;
+      const aEnd = flat ? Math.acos(0.7) : (Math.PI / 2) * 0.93, r45 = R * c45;
+      let zc = Hh - R * Math.sin(aEnd), a0, zn;
+      if (rn < r45) { // cône à 45° du col jusqu'au point tangent de la boule
+        zn = zc - R * c45 - (r45 - rn); if (zn < 5) { zc += 5 - zn; zn = 5; }
+        flare(zn, rn); pts.push([r45, zc - R * c45]); a0 = -Math.PI / 4;
+      } else { // col large : la boule part directement du col
+        a0 = -Math.acos(Math.min(1, rn / R)); zn = zc + R * Math.sin(a0); if (zn < 5) { zc += 5 - zn; zn = 5; }
+        flare(zn, rn);
+      }
+      for (let i = 1; i <= 24; i++) { const a = a0 + ((aEnd - a0) * i) / 24; pts.push([R * Math.cos(a), zc + R * Math.sin(a)]); }
+      return pts;
+    }
+    if (style === 'pear') {
+      const rk = Math.max(rn + 2, Math.min(Rb * 0.95, 13) * fk), zn = Math.max(6, Hh * 0.3);
+      const domeH = Math.max(5, rk * 0.8), zb = Hh - domeH;
+      const need = (rk - rn) * Math.PI / 2; // pente max 45°
+      const zb2 = Math.max(zb, zn + need);
+      flare(zn, rn);
+      for (let i = 1; i <= 16; i++) { const u = i / 16; pts.push([rn + (rk - rn) * Math.sin((u * Math.PI) / 2), zn + (zb2 - zn) * u]); }
+      capTo(rk, zb2, rk, Math.max(3, Hh - zb2), 0.7);
+      return pts;
+    }
+    // champignon (modèle d'origine)
+    const rk = Math.max(rn + 2, Math.min(Rb * 0.95, Math.max(rn + 3, 11)) * fk);
+    const knobRise = (rk - rn) * 1.6; // pente du dessous de la tête ≤ 45°
     const domeH = Math.max(4, rk * 0.45);
     const zn = Math.max(6, Hh - domeH - knobRise);
-    const pts = [[Rb, 0], [Rb, 1.2]];
-    const n = 24;
-    for (let i = 1; i <= n; i++) { // évasement concave base -> col
-      const u = i / n, e = 1 - Math.pow(1 - u, 2.2);
-      pts.push([Rb - (Rb - rn) * e, 1.2 + (zn - 1.2) * u]);
-    }
-    const zk = zn + knobRise;
+    flare(zn, rn);
     for (let i = 1; i <= 8; i++) { const u = i / 8; pts.push([rn + (rk - rn) * Math.sin((u * Math.PI) / 2), zn + knobRise * u]); }
-    for (let i = 1; i <= 16; i++) { const a = (i / 16) * (Math.PI / 2) * 0.93; pts.push([rk * Math.cos(a), zk + domeH * Math.sin(a)]); }
+    capTo(rk, zn + knobRise, rk, domeH, 0.72);
     return pts;
   }
-  function handleMesh(Rb, Hh, N = 96) {
-    const m = new Mesh(), pr = handleProfile(Rb, Hh);
-    const P = (r, z, k) => { const a = (2 * Math.PI * (k % N)) / N; return [r * Math.cos(a), r * Math.sin(a), z]; };
+  // o : profil + {facets (0 = rond, 3..12), twist (degrés), top: {paths (Clipper), h}}
+  function handleMesh(Rb, Hh, o = {}) {
+    const m = new Mesh(), pr = handleProfile(Rb, Hh, o);
+    const N = o.facets >= 3 ? Math.round(o.facets) : 96, tw = ((o.twist || 0) * Math.PI) / 180, ztop = pr[pr.length - 1][1];
+    const P = (r, z, k) => { const a = (2 * Math.PI * (k % N)) / N + Math.PI / 2 + tw * (z / ztop); return [r * Math.cos(a), r * Math.sin(a), z]; };
     for (let j = 0; j < pr.length - 1; j++) {
       const [r0, z0] = pr[j], [r1, z1] = pr[j + 1];
       for (let k = 0; k < N; k++) {
@@ -9705,7 +9776,39 @@ const Geo = (() => {
     }
     const [rb, zb] = pr[0], [rt, zt] = pr[pr.length - 1];
     for (let k = 0; k < N; k++) { m.tri([0, 0, zb], P(rb, zb, k + 1), P(rb, zb, k)); m.tri([0, 0, zt], P(rt, zt, k), P(rt, zt, k + 1)); }
-    return new Float32Array(m.t);
+    // décor en relief posé sur le dessus plat (pièce fermée à part, fusionnée par le trancheur)
+    let topInfo = null;
+    if (o.top && o.top.paths && o.top.paths.length) {
+      const rIn = rt * (N < 96 ? Math.cos(Math.PI / N) : 1) - 0.8;
+      const t = tree(inter(o.top.paths, [circlePath(Math.max(1, rIn), 96)]));
+      const w = walk(t), h = o.top.h || 1;
+      for (const f of w.filled) { face(m, f.outer, f.holes, zt, false); face(m, f.outer, f.holes, zt + h, true); }
+      for (const r of w.rings) wall(m, r.ring, zt, zt + h, !r.hole);
+      topInfo = { radius: rIn };
+    }
+    const out = new Float32Array(m.t); out.topZ = zt; out.topR = rt; out.topInfo = topInfo;
+    let mr = 0; for (const [r] of pr) mr = Math.max(mr, r); out.maxR = mr;
+    return out;
+  }
+  // rayon libre sur le dessus plat (pour y caser initiales ou symbole)
+  function handleTopRadius(Rb, Hh, o) { const pr = handleProfile(Rb, Hh, Object.assign({}, o, { flat: true })); const N = o.facets >= 3 ? o.facets : 96; return pr[pr.length - 1][0] * (N < 96 ? Math.cos(Math.PI / N) : 1) - 0.8; }
+  // décor du dessus : texte (initiales) ou image, centré, dans un disque de rayon r ; lisible vu de dessus
+  function topPaths(o, r) {
+    if (!(r > 2)) return [];
+    if (o.topText && o.font) {
+      const lay = layoutText(o.font, o.topText, 1.0); if (!lay) return [];
+      const tw = lay.bb.x2 - lay.bb.x1, th = lay.bb.y2 - lay.bb.y1, sc = (2 * r * 0.92) / Math.hypot(tw, th);
+      const cx = (lay.bb.x1 + lay.bb.x2) / 2, cy = (lay.bb.y1 + lay.bb.y2) / 2;
+      const cmds = lay.cmds.map((c) => { const q = { type: c.type }; for (const k of ['x', 'y', 'x1', 'y1', 'x2', 'y2']) if (k in c) q[k] = k[0] === 'x' ? c[k] - cx : c[k] - cy; return q; });
+      let pth = union(flattenCmds(cmds, sc, -sc, 0.08));
+      if (o.thicken > 0) pth = offset(pth, o.thicken / 2);
+      return pth;
+    }
+    if (o.topImage) {
+      const a = o.topImage.w / o.topImage.h, k = (2 * r * 0.9) / Math.hypot(a, 1);
+      return imagePaths(o.topImage, { imgThreshold: 0.5, imgInvert: false, imgSmooth: 0.1, imgMinArea: 0.3 }, a * k, k);
+    }
+    return [];
   }
 
   // ---------- Contrôles ----------
@@ -9780,7 +9883,7 @@ const Geo = (() => {
     if (q !== p) d.warnings = d.warnings.filter(Boolean).concat(chk.watertight && p.image ? ["Image très détaillée : un peu plus de lissage a été appliqué automatiquement pour obtenir un modèle imprimable."] : []);
     return { d, plate, chk, p: q };
   }
-  return { design, build, autoThreshold, imagePaths, plateMesh, handleMesh, handleProfile, check, stl, zip, toMM, walk };
+  return { design, build, autoThreshold, imagePaths, plateMesh, handleMesh, handleProfile, handleTopRadius, topPaths, check, stl, zip, toMM, walk };
 })();
 if (typeof module !== 'undefined') module.exports = Geo;
 
@@ -9796,19 +9899,21 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
     try { fonts[name] = opentype.parse(b64(data)); const o = document.createElement('option'); o.value = name; o.textContent = name; $('font').appendChild(o); } catch (e) { console.warn(name, e); }
   }
   if (fonts['Lobster']) $('font').value = 'Lobster'; // police par défaut
-  let shape = 'rect', view = 'print', last = null;
+  let shape = 'rect', view = 'print', last = null, hStyle = 'mush', hSym = null;
+  const hSymCache = {};
   const SQ = { round: 1, poly: 1, star: 1, biscuit: 1 };
   const SIDES = { poly: [3, 12, 6, 'Nombre de côtés'], star: [4, 12, 5, 'Nombre de branches'], biscuit: [8, 24, 12, 'Nombre de festons'] }, sidesMem = {};
   const SHAPE_NAMES = { rect: 'rectangle', round: 'ronde', oval: 'ovale', poly: 'polygone', star: 'étoile', biscuit: 'biscuit', heart: 'cœur', shield: 'blason' };
 
   // ----- réglages -----
   const fmt = { oScale: (v) => v + ' %', oGap: (v) => (+v).toFixed(2).replace('.', ','), oThick: (v) => (+v).toFixed(2).replace('.', ',') + ' mm',
+    oHNeck: (v) => v + ' %', oHKnob: (v) => v + ' %', oHFac: (v) => (+v < 3 ? 'rond' : v), oHTw: (v) => v + '°',
     oSides: (v) => v, oLines: (v) => (+v ? v : 'aucune'), oLineW: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oLineSp: (v) => (+v).toFixed(1).replace('.', ',') + ' mm',
     oOrnN: (v) => v, oOrnSz: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oTxtX: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oTxtY: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oStarIn: (v) => v + ' %',
     oRad: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oMargin: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oBw: (v) => (+v).toFixed(1).replace('.', ',') + ' mm',
     oBase: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oRelief: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oHh: (v) => v + ' mm',
     oThr: (v) => v + ' %', oSmooth: (v) => (+v).toFixed(2).replace('.', ',') + ' mm', oMinA: (v) => (+v).toFixed(1).replace('.', ',') + ' mm²', oImgScale: (v) => v + ' %', oImgX: (v) => (+v).toFixed(1).replace('.', ',') + ' mm', oImgY: (v) => (+v).toFixed(1).replace('.', ',') + ' mm' };
-  const outs = { textScale: 'oScale', lineGap: 'oGap', thicken: 'oThick', radius: 'oRad', sides: 'oSides', starIn: 'oStarIn', lines: 'oLines', lineW: 'oLineW', lineSp: 'oLineSp', ornN: 'oOrnN', ornSz: 'oOrnSz', txtX: 'oTxtX', txtY: 'oTxtY', margin: 'oMargin', borderW: 'oBw', base: 'oBase', relief: 'oRelief', handleH: 'oHh',
+  const outs = { textScale: 'oScale', lineGap: 'oGap', thicken: 'oThick', radius: 'oRad', sides: 'oSides', starIn: 'oStarIn', hNeck: 'oHNeck', hKnob: 'oHKnob', hFac: 'oHFac', hTw: 'oHTw', lines: 'oLines', lineW: 'oLineW', lineSp: 'oLineSp', ornN: 'oOrnN', ornSz: 'oOrnSz', txtX: 'oTxtX', txtY: 'oTxtY', margin: 'oMargin', borderW: 'oBw', base: 'oBase', relief: 'oRelief', handleH: 'oHh',
     imgThr: 'oThr', imgSmooth: 'oSmooth', imgMinA: 'oMinA', imgScale: 'oImgScale', imgX: 'oImgX', imgY: 'oImgY' };
   let image = null, imgName = '', textAlign = true, inkT = null, dragging = false;
   const syncOuts = () => { for (const [i, o] of Object.entries(outs)) $(o).textContent = fmt[o]($(i).value); };
@@ -9821,6 +9926,7 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
       base: +$('base').value, relief: +$('relief').value, margin: +$('margin').value, border: $('border').checked, borderW: +$('borderW').value,
       thicken: +$('thicken').value, mirror: $('mirror').checked, font: fonts[$('font').value], text: $('text').value, lineGap: +$('lineGap').value,
       textScale: +$('textScale').value / 100, handle: $('handle').checked, handleH: +$('handleH').value,
+      hStyle, hNeck: +$('hNeck').value / 100, hKnob: +$('hKnob').value / 100, hFac: +$('hFac').value, hTw: +$('hTw').value, hTop: $('hTop').value, hTopText: $('hTopText').value.trim(), hSym,
       image: image && $('imgUse').checked ? image : null, imgThreshold: +$('imgThr').value / 100, imgInvert: $('imgInv').checked,
       imgSmooth: +$('imgSmooth').value, imgMinArea: +$('imgMinA').value, imgScale: +$('imgScale').value / 100, imgX: +$('imgX').value, imgY: +$('imgY').value, textAlign,
     };
@@ -9854,14 +9960,14 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
       handleObj.position.set(0, 0, tot); handleObj.rotation.set(0, 0, 0);
     } else {
       plateObj.rotation.set(0, 0, 0); plateObj.position.set(0, 0, 0);
-      handleObj.position.set(d.W / 2 + d.Rb + 8, 0, 0); handleObj.rotation.set(0, 0, 0);
+      handleObj.position.set(d.W / 2 + (last.hR || d.Rb) + 8, 0, 0); handleObj.rotation.set(0, 0, 0);
     }
     if (!framed) frame();
   }
   function frame() {
     if (!last) return;
-    const d = last.d, span = Math.max(d.W + (last.p.handle ? 2 * d.Rb + 8 : 0), d.H, 40);
-    ctl.target.set(last.p.handle && view !== 'asm' ? (d.Rb + 4) : 0, 0, 5);
+    const d = last.d, hR = last.hR || d.Rb, span = Math.max(d.W + (last.p.handle ? 2 * hR + 8 : 0), d.H, 40);
+    ctl.target.set(last.p.handle && view !== 'asm' ? (hR + 4) : 0, 0, 5);
     const k = Math.max(1, 1.3 / Math.max(0.3, cam.aspect));
     cam.position.set(ctl.target.x + span * 0.15 * k, -span * 1.25 * k, span * 1.05 * k);
     ctl.update(); framed = true;
@@ -9919,6 +10025,40 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
   for (const b of document.querySelectorAll('.tabs button')) b.onclick = () => showTab(b.dataset.tab);
   try { const k = localStorage.getItem('tampons.tab'); if (k && $('pane-' + k)) showTab(k); } catch (e) {}
 
+  // ----- poignée -----
+  function makeHandle(p, d) {
+    const o = { style: p.hStyle, neck: p.hNeck, knob: p.hKnob, facets: p.hFac >= 3 ? p.hFac : 0, twist: p.hFac >= 3 ? p.hTw : 0 };
+    const deco = p.hTop === 'text' ? !!p.hTopText : p.hTop === 'sym' ? !!p.hSym : false;
+    if (deco) {
+      o.flat = true;
+      const r = Geo.handleTopRadius(d.Rb, p.handleH, o);
+      let topImage = null;
+      if (p.hTop === 'sym') { const sy = SYMBOLS.find((x) => x[0] === p.hSym); if (sy) topImage = hSymCache[sy[0]] || (hSymCache[sy[0]] = symRaster(sy[2]).image); }
+      const paths = Geo.topPaths({ topText: p.hTop === 'text' ? p.hTopText : '', font: p.font, thicken: p.thicken, topImage }, r);
+      o.top = { paths, h: 1.2 };
+      if (r < 5) d.warnings.push('Le dessus de la poignée est petit pour un décor : grossis la tête ou choisis le modèle Palet.');
+    }
+    const m = Geo.handleMesh(d.Rb, p.handleH, o);
+    return m;
+  }
+  for (const b of document.querySelectorAll('#hStyles button')) b.onclick = () => {
+    hStyle = b.dataset.hs; for (const x of document.querySelectorAll('#hStyles button')) x.setAttribute('aria-pressed', x === b); framed = false; schedule();
+  };
+  $('hTop').addEventListener('change', () => {
+    const v = $('hTop').value; $('hTopTextWrap').hidden = v !== 'text'; $('hSymGrid').hidden = v !== 'sym'; $('hTopHelp').hidden = v === 'none';
+    if (v === 'sym' && !$('hSymGrid').children.length) {
+      for (const [k, lab, dd] of SYMBOLS) {
+        const b = document.createElement('button'); b.type = 'button'; b.dataset.k = k; b.title = lab; b.setAttribute('aria-label', lab); b.setAttribute('aria-pressed', 'false');
+        b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${dd}"/></svg>`;
+        b.onclick = () => { hSym = k; for (const x of $('hSymGrid').children) x.setAttribute('aria-pressed', x === b); schedule(); };
+        $('hSymGrid').appendChild(b);
+      }
+    }
+    schedule();
+  });
+  $('hTopText').addEventListener('input', schedule);
+  for (const id of ['hNeck', 'hKnob', 'hFac', 'hTw']) $(id).addEventListener('input', schedule);
+
   // ----- génération -----
   let timer = null;
   function schedule() { clearTimeout(timer); timer = setTimeout(build, 140); syncOuts(); }
@@ -9928,7 +10068,7 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
     $('hWrap').hidden = sq; $('radWrap').hidden = !['rect', 'poly', 'star', 'shield'].includes(shape);
     $('wLabel').textContent = sq ? 'Diamètre (mm)' : 'Largeur (mm)';
     $('sidesWrap').hidden = !SIDES[shape]; $('starWrap').hidden = shape !== 'star';
-    $('bwWrap').hidden = !p.border; $('hhWrap').hidden = !p.handle;
+    $('bwWrap').hidden = !p.border; $('hCtl').hidden = !p.handle; $('hTwWrap').hidden = p.hFac < 3;
     const hasText = !!(p.text && p.text.trim());
     $('layWrap').hidden = !(p.image && hasText);
     const H2 = (sq ? p.w : p.h) / 2;
@@ -9939,10 +10079,10 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
     try {
       const b = Geo.build(p);
       d = b.d; plate = b.plate; chk = b.chk;
-      handle = p.handle ? Geo.handleMesh(d.Rb, p.handleH) : null;
+      handle = p.handle ? makeHandle(p, d) : null;
     } catch (e) { console.error(e); $('msg').textContent = p.image ? "Le calcul a échoué pour cette image. Augmente le lissage ou change le seuil." : 'Le calcul a échoué pour ce texte. Essaie une autre police ou une taille plus grande.'; return; }
     const chkH = handle ? Geo.check(handle) : { watertight: true, triangles: 0 };
-    last = { p, d, plate, handle, ok: chk.watertight && chkH.watertight };
+    last = { p, d, plate, handle, hR: handle ? handle.maxR : 0, ok: chk.watertight && chkH.watertight };
     setGeo(plateObj, plate); if (handle) setGeo(handleObj, handle);
     place();
     const n = (v) => v.toFixed(1).replace('.', ',');
@@ -9972,7 +10112,7 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
     const info = [p.text.trim() ? `Tampon « ${p.text.replace(/\n/g, ' / ')} »` : 'Tampon', p.text.trim() ? `Police : ${$('font').value}` : null,
       p.image ? `Image : ${imgName} (seuil ${Math.round(p.imgThreshold * 100)} %${p.imgInvert ? ', inversée' : ''}, ${n(last.d.imageInfo ? last.d.imageInfo.width : 0)} x ${n(last.d.imageInfo ? last.d.imageInfo.height : 0)} mm)` : null,
       `Plaque ${SHAPE_NAMES[shape] || ''} : ${shape === 'round' ? 'Ø ' + n(last.d.W) : n(last.d.W) + ' x ' + n(last.d.H)} mm, épaisseur ${n(p.base)} mm, relief ${n(p.relief)} mm (${p.mirror ? 'déjà en miroir' : 'sans miroir'})`,
-      p.handle ? `Poignée : hauteur ${p.handleH} mm, base Ø ${n(last.d.Rb * 2)} mm, à coller dans le cercle gravé au dos (le petit trait = haut du texte)` : 'Sans poignée',
+      p.handle ? `Poignée ${({ mush: 'champignon', ball: 'boule', pear: 'poire', cyl: 'colonne', disc: 'palet' })[p.hStyle] || ''}${p.hFac >= 3 ? `, ${p.hFac} facettes` : ''}${p.hTop === 'text' && p.hTopText ? `, initiales « ${p.hTopText} » sur le dessus` : ''} : hauteur ${p.handleH} mm, base Ø ${n(last.d.Rb * 2)} mm, à coller dans le cercle gravé au dos (le petit trait = haut du texte)` : 'Sans poignée',
       '', 'Impression : plaque à plat relief vers le haut ; poignée debout sur sa base ; sans supports.', 'Couches de 0,12 à 0,16 mm conseillées. Le TPU donne une empreinte plus régulière que le PLA.'].filter((l) => l !== null).join('\r\n');
     files.push({ name: 'LISEZMOI.txt', data: new TextEncoder().encode(info) });
     return { name, files };
@@ -10112,6 +10252,15 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
     }
   }
   $('symPick').onclick = () => { buildSymGrid(); const h = !$('symGrid').hidden; $('symGrid').hidden = h; $('symPick').setAttribute('aria-expanded', !h); };
+  function symRaster(d) {
+    const N = 720, c = document.createElement('canvas'); c.width = c.height = N;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.scale(N / 24, N / 24); g.fillStyle = '#000'; g.fill(new Path2D(d));
+    const px = g.getImageData(0, 0, N, N).data; let x1 = N, y1 = N, x2 = -1, y2 = -1;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (px[(y * N + x) * 4 + 3] > 20) { if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y; }
+    const m = 6, w = x2 - x1 + 1 + 2 * m, h = y2 - y1 + 1 + 2 * m, cc = document.createElement('canvas'); cc.width = w; cc.height = h;
+    cc.getContext('2d').drawImage(c, x1 - m, y1 - m, w, h, 0, 0, w, h);
+    return { image: rasterize(cc, w, h), w, h };
+  }
   function useSymbol(k, lab, d) {
     const N = 720, c = document.createElement('canvas'); c.width = c.height = N;
     const g = c.getContext('2d', { willReadFrequently: true }); g.scale(N / 24, N / 24); g.fillStyle = '#000'; g.fill(new Path2D(d));
