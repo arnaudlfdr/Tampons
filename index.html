@@ -23,10 +23,11 @@ h1{font-family:var(--f-display);font-weight:400;font-size:26px;letter-spacing:.0
 header p{margin:0;color:var(--muted)}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:calc(var(--r) + 2px);padding:14px;display:flex;flex-direction:column;gap:14px;min-width:0}
 fieldset{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;min-width:0}
+[hidden]{display:none!important}
 legend{font-family:var(--f-display);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:0;margin-bottom:8px}
 .sep{border-top:1px solid var(--line)}
 label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
-textarea,select,input[type=number]{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;width:100%}
+textarea,select,input[type=number],input[type=text]{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;width:100%}
 textarea{font-family:var(--f-body);font-size:17px;resize:vertical;min-height:64px}
 textarea:focus,select:focus,input:focus,button:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -284,6 +285,13 @@ body{background-image:var(--deco);background-attachment:fixed}
 
     <div class="warns" id="warns"></div>
     <button class="btn" id="dl" disabled>Télécharger les STL (.zip)</button>
+    <fieldset id="sendBox" hidden>
+      <legend>Envoyer à Bruce</legend>
+      <label for="sender">Ton prénom</label>
+      <input id="sender" type="text" maxlength="40" autocomplete="given-name" placeholder="Ex. Camille">
+      <button class="btn" id="send" disabled>Envoyer mon tampon à Bruce</button>
+      <p class="small" style="margin:0">Les STL partent directement dans le dossier de Bruce, qui les imprimera.</p>
+    </fieldset>
     <div class="msg" id="msg" role="status"></div>
     <details>
       <summary>Conseils d'impression</summary>
@@ -9646,10 +9654,11 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
 
   // ----- export -----
   const slug = (s) => (s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'tampon');
+  // Adresse du script Google Apps Script qui range les STL reçus dans le Drive de Bruce (vide = bouton caché)
+  const ENVOI_URL = '';
   let downloads = null;
   const ready = (window.claude && window.claude.use) ? window.claude.use('downloads').then((x) => { downloads = x; }).catch(() => {}) : Promise.resolve();
-  $('dl').addEventListener('click', async () => {
-    if (!last) return;
+  function makeFiles() {
     const p = last.p, name = slug(p.text.trim() ? p.text.split('\n').join(' ') : (p.image ? imgName.replace(/\.[^.]+$/, '') : ''));
     const n = (v) => v.toFixed(1).replace('.', ',');
     const files = [{ name: `Tampon_${name}_plaque.stl`, data: Geo.stl(last.plate, name + ' plaque') }];
@@ -9660,6 +9669,11 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
       p.handle ? `Poignée : hauteur ${p.handleH} mm, base Ø ${n(last.d.Rb * 2)} mm, à coller dans le cercle gravé au dos (le petit trait = haut du texte)` : 'Sans poignée',
       '', 'Impression : plaque à plat relief vers le haut ; poignée debout sur sa base ; sans supports.', 'Couches de 0,12 à 0,16 mm conseillées. Le TPU donne une empreinte plus régulière que le PLA.'].filter((l) => l !== null).join('\r\n');
     files.push({ name: 'LISEZMOI.txt', data: new TextEncoder().encode(info) });
+    return { name, files };
+  }
+  $('dl').addEventListener('click', async () => {
+    if (!last) return;
+    const { name, files } = makeFiles();
     const zip = Geo.zip(files);
     await ready;
     if (!downloads) {
@@ -9680,6 +9694,36 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
       $('msg').textContent = c === 'declined' ? 'Téléchargement annulé.' : c === 'rate_limited' ? 'Une demande est déjà ouverte. Réessaie dans un instant.' : "Le téléchargement n'a pas pu se faire ici.";
     }
   });
+
+  // ----- envoi à Bruce -----
+  if (ENVOI_URL) {
+    $('sendBox').hidden = false;
+    try { $('sender').value = localStorage.getItem('tampons.sender') || ''; } catch (e) {}
+    const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+    let sending = false;
+    const sync = () => { $('send').disabled = sending || !last || last.d.empty || !$('sender').value.trim(); };
+    $('sender').addEventListener('input', sync);
+    new MutationObserver(sync).observe($('dl'), { attributes: true, attributeFilter: ['disabled'] });
+    sync();
+    $('send').addEventListener('click', async () => {
+      if (!last || sending) return;
+      const who = $('sender').value.trim();
+      if (!who) { $('sender').focus(); return; }
+      try { localStorage.setItem('tampons.sender', who); } catch (e) {}
+      const { name, files } = makeFiles();
+      sending = true; sync();
+      $('msg').textContent = 'Envoi en cours…';
+      try {
+        const body = JSON.stringify({ from: who, name, files: files.map((f) => ({ name: f.name, data: b64(f.data) })) });
+        const r = await fetch(ENVOI_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) throw new Error(j.error || r.status);
+        $('msg').textContent = `C’est envoyé ! Bruce a reçu ton tampon « ${name.replace(/_/g, ' ')} ».`;
+      } catch (e) {
+        $('msg').textContent = "L’envoi n’a pas marché. Vérifie ta connexion et réessaie, ou télécharge le zip et envoie-le à Bruce.";
+      } finally { sending = false; sync(); }
+    });
+  }
 
   // ----- événements -----
   for (const id of ['text', 'w', 'h', 'radius', 'base', 'relief', 'margin', 'border', 'borderW', 'thicken', 'lineGap', 'textScale', 'handle', 'handleH', 'font',
