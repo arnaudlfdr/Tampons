@@ -9281,6 +9281,7 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
   for (const [name, data] of Object.entries(FONTS)) {
     try { fonts[name] = opentype.parse(b64(data)); const o = document.createElement('option'); o.value = name; o.textContent = name; $('font').appendChild(o); } catch (e) { console.warn(name, e); }
   }
+  if (fonts['Lobster']) $('font').value = 'Lobster'; // police par défaut
   let shape = 'rect', view = 'print', last = null;
 
   // ----- réglages -----
