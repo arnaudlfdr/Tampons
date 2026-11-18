@@ -93,6 +93,7 @@ header p{font-size:13px;flex:1;min-width:0}
 .tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--ink)}
 .panes{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding:14px}
 .pane{display:flex;flex-direction:column;gap:14px}
+.btn.reset{align-self:flex-start;margin-top:4px;opacity:.85}
 .pfoot{flex:none;padding:8px 14px 10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px;max-height:34%;overflow:auto}
 .pfoot .msg:empty{display:none}
 .pfoot:has(.warns:empty):has(.msg:empty){display:none}
@@ -9957,7 +9958,8 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
     handleObj.visible = p.handle;
     if (view === 'asm') {
       plateObj.rotation.set(Math.PI, 0, 0); plateObj.position.set(0, 0, tot);
-      handleObj.position.set(0, 0, tot); handleObj.rotation.set(0, 0, 0);
+      // plaque retournée : le haut du texte (petit trait gravé) passe vers -Y, la poignée est collée tournée d'un demi-tour
+      handleObj.position.set(0, 0, tot); handleObj.rotation.set(0, 0, Math.PI);
     } else {
       plateObj.rotation.set(0, 0, 0); plateObj.position.set(0, 0, 0);
       handleObj.position.set(d.W / 2 + (last.hR || d.Rb) + 8, 0, 0); handleObj.rotation.set(0, 0, 0);
@@ -10023,6 +10025,28 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
     try { localStorage.setItem('tampons.tab', k); } catch (e) {}
   };
   for (const b of document.querySelectorAll('.tabs button')) b.onclick = () => showTab(b.dataset.tab);
+  // bouton « Réinitialiser » par onglet : valeurs d'origine relevées au chargement
+  const DEFAULTS = {};
+  for (const pn of document.querySelectorAll('.pane')) {
+    const k = pn.id.slice(5); if (k === 'envoi') continue;
+    DEFAULTS[k] = [...pn.querySelectorAll('input[id],select[id],textarea[id]')].filter((e) => e.type !== 'file').map((e) => [e.id, e.type === 'checkbox' ? e.checked : e.value]);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost reset'; b.textContent = 'Réinitialiser cet onglet';
+    b.onclick = () => resetTab(k); pn.appendChild(b);
+  }
+  function resetTab(k) {
+    if (k === 'forme') { setShape('rect'); for (const key in sidesMem) delete sidesMem[key]; }
+    for (const [id, v] of DEFAULTS[k]) { const e = $(id); if (e.type === 'checkbox') e.checked = v; else e.value = v; }
+    if (k === 'texte' && fonts['Lobster']) $('font').value = 'Lobster';
+    if (k === 'image') { $('imgClear').onclick(); $('symGrid').hidden = true; $('symPick').setAttribute('aria-expanded', 'false'); setAlign(true); }
+    if (k === 'poignee') {
+      hStyle = 'mush'; hSym = null;
+      for (const x of document.querySelectorAll('#hStyles button')) x.setAttribute('aria-pressed', x.dataset.hs === 'mush');
+      for (const x of $('hSymGrid').children) x.setAttribute('aria-pressed', 'false');
+      $('hTop').dispatchEvent(new Event('change'));
+    }
+    framed = false; syncOuts(); schedule(); drawInk();
+    $('msg').textContent = 'Réglages de l’onglet remis à zéro.';
+  }
   try { const k = localStorage.getItem('tampons.tab'); if (k && $('pane-' + k)) showTab(k); } catch (e) {}
 
   // ----- poignée -----
