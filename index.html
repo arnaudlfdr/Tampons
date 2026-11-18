@@ -9655,7 +9655,7 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
   // ----- export -----
   const slug = (s) => (s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'tampon');
   // Adresse du script Google Apps Script qui range les STL reçus dans le Drive de Bruce (vide = bouton caché)
-  const ENVOI_URL = '';
+  const ENVOI_URL = 'https://script.google.com/macros/s/AKfycbzNArrH2BX-VonPTuBfsaIPX4Cp3E6UlhMrPQqPp0o5O5OoyGqs3BQaFwyewL1Flghn/exec';
   let downloads = null;
   const ready = (window.claude && window.claude.use) ? window.claude.use('downloads').then((x) => { downloads = x; }).catch(() => {}) : Promise.resolve();
   function makeFiles() {
