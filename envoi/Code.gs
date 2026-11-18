@@ -1,11 +1,13 @@
 // Reçoit les tampons envoyés depuis https://arnaudlfdr.github.io/tampons/
 // et les range dans le dossier Google Drive « Tampons des amis ».
 const DOSSIER = 'Tampons des amis';
+const CODE = 'METS-TON-CODE-ICI'; // code à donner à tes amis (change-le ici puis redéploie)
 const TAILLE_MAX = 40 * 1024 * 1024; // 40 Mo par envoi
 
 function doPost(e) {
   try {
     const d = JSON.parse(e.postData.contents);
+    if (String(d.code || '').trim().toLowerCase() !== CODE.toLowerCase()) return rep({ ok: false, error: 'code' });
     const files = (d.files || []).filter((f) => /^[\w\-. ]{1,80}\.(stl|txt)$/i.test(f.name)).slice(0, 4);
     if (!files.length || !files.some((f) => /\.stl$/i.test(f.name))) return rep({ ok: false, error: 'aucun STL' });
     if (e.postData.contents.length > TAILLE_MAX) return rep({ ok: false, error: 'trop gros' });

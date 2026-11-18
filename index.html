@@ -289,6 +289,8 @@ body{background-image:var(--deco);background-attachment:fixed}
       <legend>Envoyer à Bruce</legend>
       <label for="sender">Ton prénom</label>
       <input id="sender" type="text" maxlength="40" autocomplete="given-name" placeholder="Ex. Camille">
+      <label for="sendCode">Code donné par Bruce</label>
+      <input id="sendCode" type="text" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false">
       <button class="btn" id="send" disabled>Envoyer mon tampon à Bruce</button>
       <p class="small" style="margin:0">Les STL partent directement dans le dossier de Bruce, qui les imprimera.</p>
     </fieldset>
@@ -9698,26 +9700,30 @@ const FONTS = {"Archivo Black": "AAEAAAARAQAABAAQR0RFRgLBAr0AAJzgAAAAWEdQT1PD3sE
   // ----- envoi à Bruce -----
   if (ENVOI_URL) {
     $('sendBox').hidden = false;
-    try { $('sender').value = localStorage.getItem('tampons.sender') || ''; } catch (e) {}
+    try { $('sender').value = localStorage.getItem('tampons.sender') || ''; $('sendCode').value = localStorage.getItem('tampons.code') || ''; } catch (e) {}
     const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
     let sending = false;
-    const sync = () => { $('send').disabled = sending || !last || last.d.empty || !$('sender').value.trim(); };
+    const sync = () => { $('send').disabled = sending || !last || last.d.empty || !$('sender').value.trim() || !$('sendCode').value.trim(); };
     $('sender').addEventListener('input', sync);
+    $('sendCode').addEventListener('input', sync);
     new MutationObserver(sync).observe($('dl'), { attributes: true, attributeFilter: ['disabled'] });
     sync();
     $('send').addEventListener('click', async () => {
       if (!last || sending) return;
       const who = $('sender').value.trim();
       if (!who) { $('sender').focus(); return; }
+      const code = $('sendCode').value.trim();
       try { localStorage.setItem('tampons.sender', who); } catch (e) {}
       const { name, files } = makeFiles();
       sending = true; sync();
       $('msg').textContent = 'Envoi en cours…';
       try {
-        const body = JSON.stringify({ from: who, name, files: files.map((f) => ({ name: f.name, data: b64(f.data) })) });
+        const body = JSON.stringify({ from: who, code, name, files: files.map((f) => ({ name: f.name, data: b64(f.data) })) });
         const r = await fetch(ENVOI_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body });
         const j = await r.json().catch(() => ({}));
+        if (j.error === 'code') { $('msg').textContent = 'Code incorrect : demande le bon code à Bruce.'; $('sendCode').focus(); return; }
         if (!r.ok || !j.ok) throw new Error(j.error || r.status);
+        try { localStorage.setItem('tampons.code', code); } catch (e) {}
         $('msg').textContent = `C’est envoyé ! Bruce a reçu ton tampon « ${name.replace(/_/g, ' ')} ».`;
       } catch (e) {
         $('msg').textContent = "L’envoi n’a pas marché. Vérifie ta connexion et réessaie, ou télécharge le zip et envoie-le à Bruce.";
